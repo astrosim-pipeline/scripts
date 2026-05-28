@@ -1,0 +1,434 @@
+-- Mobile Optimized Deity Hub (No Invisibility)
+local ACCEPTEDRATE = 2.5
+local AmberAlertRate = 10
+local PlayerESP = true
+
+local RedAlertSound = 9118805558
+local AmberAlertSound = 139302680939651
+local GoldCarsAlert = 140191790330867
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local localPlayer = player
+local mouse = player:GetMouse()
+local vehiclesFolder = Workspace:WaitForChild("Vehicles")
+
+local notifiedVehicles = {} 
+local selectedLoc = "Junkyard"
+local menuOpen = true
+local running = true
+local minimized = false
+
+local locations = {
+    ["Junkyard"] = Vector3.new(-1659.89, 4.25, -343.20),
+    ["Garage"]   = Vector3.new(-1914.75, 4.28, -562.92),
+    ["Shop"]     = Vector3.new(-1466.5, 5.2, -536.0),
+    ["Bank"]     = Vector3.new(-1455.0, 5.5, -750.5),
+    ["Sell/Auc"] = Vector3.new(-1910, 3.9, -815.2),
+    ["Repair"]   = Vector3.new(-1087.20, 4.53, -339.91)
+}
+
+local function formatNumber(n)
+    n = tonumber(n) or 0
+    if n >= 1e6 then
+        return string.format("%.2fM", n / 1e6)
+    elseif n >= 1e5 then
+        return string.format("%.1fK", n / 1e3)
+    else
+        return tostring(math.floor(n))
+    end
+end
+
+-- Smaller Mobile Player ESP
+local function createESP(character, plr)
+    if not PlayerESP or not character or plr == localPlayer then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    pcall(function()
+        if character:FindFirstChild("PlayerESP_Highlight") then character.PlayerESP_Highlight:Destroy() end
+        if hrp:FindFirstChild("PlayerESP_Name") then hrp.PlayerESP_Name:Destroy() end
+    end)
+
+    local hl = Instance.new("Highlight")
+    hl.Name = "PlayerESP_Highlight"
+    hl.FillColor = Color3.fromRGB(0, 255, 0)
+    hl.FillTransparency = 0.7
+    hl.OutlineThickness = 1.1
+    hl.Parent = character
+
+    local bill = Instance.new("BillboardGui")
+    bill.Name = "PlayerESP_Name"
+    bill.Size = UDim2.new(0, 108, 0, 32)
+    bill.StudsOffset = Vector3.new(0, 3.4, 0)
+    bill.AlwaysOnTop = true
+    bill.Parent = hrp
+
+    local text = Instance.new("TextLabel")
+    text.Size = UDim2.new(1, 0, 1, 0)
+    text.BackgroundTransparency = 1
+    text.TextColor3 = Color3.fromRGB(255, 255, 255)
+    text.TextStrokeTransparency = 0.35
+    text.TextStrokeColor3 = Color3.new(0,0,0)
+    text.TextScaled = true
+    text.Font = Enum.Font.GothamSemibold
+    text.RichText = true
+    text.Parent = bill
+
+    task.spawn(function()
+        while text.Parent and character.Parent do
+            local data = plr:FindFirstChild("PlayerData")
+            local status = data and data:FindFirstChild("Status")
+            local money = status and status:FindFirstChild("Money")
+            text.Text = plr.Name .. "\n<font color='rgb(255,215,0)'>€" .. formatNumber(money and money.Value or 0) .. "</font>"
+            task.wait(1.3)
+        end
+    end)
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr \~= localPlayer then
+        if plr.Character then createESP(plr.Character, plr) end
+        plr.CharacterAdded:Connect(function(char) task.wait(0.6) createESP(char, plr) end)
+    end
+end
+Players.PlayerAdded:Connect(function(plr)
+    if plr \~= localPlayer then
+        plr.CharacterAdded:Connect(function(char) task.wait(0.6) createESP(char, plr) end)
+    end
+end)
+
+local screenGui = Instance.new("ScreenGui", player.PlayerGui)
+screenGui.Name = "DeityHub"
+screenGui.ResetOnSpawn = false
+
+-- Compact Mobile Alert
+local function screenAlert(chanceText, alertType)
+    if not running then return end
+    local alert = Instance.new("TextLabel", screenGui)
+    alert.Size = UDim2.new(1, -50, 0, 33)
+    alert.Position = UDim2.new(0, 25, 0, 48)
+    alert.BackgroundTransparency = 0.25
+    alert.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    alert.TextSize = 19
+    alert.Font = Enum.Font.GothamBold
+    alert.TextStrokeTransparency = 0.5
+    Instance.new("UICorner", alert).CornerRadius = UDim.new(0, 8)
+
+    local sound = Instance.new("Sound", player.PlayerGui)
+    sound.Volume = 5.5
+
+    if alertType == "Gold" then
+        alert.TextColor3 = Color3.fromRGB(255, 215, 0)
+        alert.Text = "💰 GOLD CAR DETECTED 💰"
+        sound.SoundId = "rbxassetid://" .. GoldCarsAlert
+    elseif alertType == "Amber" then
+        alert.TextColor3 = Color3.fromRGB(255, 170, 0)
+        alert.Text = "🟠 Amber Car: " .. chanceText .. "%"
+        sound.SoundId = "rbxassetid://" .. AmberAlertSound
+    else
+        alert.TextColor3 = Color3.fromRGB(255, 0, 0)
+        alert.Text = "🚨 Rare Car: " .. chanceText .. "%"
+        sound.SoundId = "rbxassetid://" .. RedAlertSound
+    end
+
+    sound:Play()
+    task.delay(3.8, function() alert:Destroy() sound:Destroy() end)
+end
+
+-- Compact Info Panel
+local infoFrame = Instance.new("Frame", screenGui)
+infoFrame.Size = UDim2.new(0, 225, 0, 78)
+infoFrame.Position = UDim2.new(1, -235, 0, 8)
+infoFrame.BackgroundTransparency = 1
+
+local timerLabel = Instance.new("TextLabel", infoFrame)
+timerLabel.Size = UDim2.new(1, 0, 0, 35)
+timerLabel.BackgroundColor3 = Color3.fromRGB(15,15,15)
+timerLabel.BackgroundTransparency = 0.35
+timerLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+timerLabel.TextSize = 18
+timerLabel.Font = Enum.Font.GothamBold
+timerLabel.Text = "Respawn --"
+Instance.new("UICorner", timerLabel).CornerRadius = UDim.new(0, 6)
+
+local goldLabel = Instance.new("TextLabel", infoFrame)
+goldLabel.Size = UDim2.new(1, 0, 0, 35)
+goldLabel.Position = UDim2.new(0, 0, 0, 37)
+goldLabel.BackgroundColor3 = Color3.fromRGB(15,15,15)
+goldLabel.BackgroundTransparency = 0.35
+goldLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+goldLabel.TextSize = 16.5
+goldLabel.Font = Enum.Font.GothamBold
+goldLabel.RichText = true
+goldLabel.Text = "Gold: 0"
+Instance.new("UICorner", goldLabel).CornerRadius = UDim.new(0, 6)
+
+-- Main Menu (Smaller + Minimizable + Draggable)
+local main = Instance.new("Frame", screenGui)
+main.Size = UDim2.new(0, 188, 0, 242)
+main.Position = UDim2.new(0.5, -94, 0.28, 0)
+main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+main.Active = true
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel", main)
+title.Size = UDim2.new(1, 0, 0, 28)
+title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+title.Text = " ⚡️ DEITY HUB"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextSize = 16
+title.Font = Enum.Font.GothamBold
+Instance.new("UICorner", title)
+
+local minimizeBtn = Instance.new("TextButton", title)
+minimizeBtn.Size = UDim2.new(0, 24, 0, 24)
+minimizeBtn.Position = UDim2.new(1, -28, 0.5, -12)
+minimizeBtn.BackgroundTransparency = 1
+minimizeBtn.Text = "−"
+minimizeBtn.TextColor3 = Color3.new(1,1,1)
+minimizeBtn.TextSize = 20
+
+local container = Instance.new("Frame", main)
+container.Size = UDim2.new(1, 0, 1, -28)
+container.Position = UDim2.new(0, 0, 0, 28)
+container.BackgroundTransparency = 1
+
+local function makeButton(parent, yPos, color, text)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(0.9, 0, 0, 29)
+    btn.Position = UDim2.new(0.05, 0, yPos, 0)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextScaled = true
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
+
+local dropBtn = makeButton(container, 0.04, Color3.fromRGB(45,45,45), "📍 TO: Junkyard")
+
+local dropFrame = Instance.new("ScrollingFrame", container)
+dropFrame.Size = UDim2.new(0.9, 0, 0, 85)
+dropFrame.Position = UDim2.new(0.05, 0, 0.19, 0)
+dropFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+dropFrame.Visible = false
+dropFrame.CanvasSize = UDim2.new(0,0,0,170)
+Instance.new("UICorner", dropFrame)
+
+for name, _ in pairs(locations) do
+    local b = Instance.new("TextButton", dropFrame)
+    b.Size = UDim2.new(1, 0, 0, 26)
+    b.Text = " » " .. name
+    b.TextScaled = true
+    b.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    b.TextColor3 = Color3.new(1,1,1)
+    b.MouseButton1Click:Connect(function()
+        selectedLoc = name
+        dropBtn.Text = "📍 TO: " .. name
+        dropFrame.Visible = false
+    end)
+end
+dropBtn.MouseButton1Click:Connect(function() dropFrame.Visible = not dropFrame.Visible end)
+
+local tpBtn = makeButton(container, 0.47, Color3.fromRGB(0, 160, 255), "🚀 TELEPORT")
+local bestCarBtn = makeButton(container, 0.67, Color3.fromRGB(180, 0, 255), "💎 TP BEST CAR")
+local exclusiveBtn = makeButton(container, 0.87, Color3.fromRGB(255, 200, 0), "💛 TP EXCLUSIVE")
+
+-- Minimize
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    container.Visible = not minimized
+    minimizeBtn.Text = minimized and "+" or "−"
+    main.Size = minimized and UDim2.new(0, 188, 0, 32) or UDim2.new(0, 188, 0, 242)
+end)
+
+local function isRealCar(v)
+    local owner = v:GetAttribute("Owner") or v:FindFirstChild("Owner")
+    return not (owner and tostring(owner) \~= "" and tostring(owner) \~= "0")
+end
+
+local function createBeamToCar(car, color)
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not car then return end
+    local carPart = car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart", true)
+    if not carPart then return end
+
+    pcall(function() if car:FindFirstChild("RareCarBeam") then car.RareCarBeam:Destroy() end end)
+
+    local a0 = Instance.new("Attachment", hrp)
+    local a1 = Instance.new("Attachment", carPart)
+    local beam = Instance.new("Beam", car)
+    beam.Name = "RareCarBeam"
+    beam.Attachment0 = a0
+    beam.Attachment1 = a1
+    beam.FaceCamera = true
+    beam.Width0 = 0.3
+    beam.Width1 = 0.3
+    beam.Color = ColorSequence.new(color)
+    beam.Transparency = NumberSequence.new(0.2)
+
+    task.delay(18, function() pcall(function() beam:Destroy() a0:Destroy() a1:Destroy() end) end)
+end
+
+-- Mobile Vehicle ESP (Small Tags + Orange Guidance)
+local function applyESP()
+    if not running then return end
+    for _, v in pairs(vehiclesFolder:GetChildren()) do
+        if not isRealCar(v) then continue end
+
+        local chance = tonumber(v:GetAttribute("SpawnChance"))
+
+        if chance and chance > 0 and chance <= ACCEPTEDRATE and not notifiedVehicles[v] then
+            screenAlert(tostring(chance), "Rare")
+            createBeamToCar(v, Color3.fromRGB(255, 0, 0))
+            notifiedVehicles[v] = true
+        elseif chance and chance > ACCEPTEDRATE and chance <= AmberAlertRate and not notifiedVehicles[v] then
+            screenAlert(tostring(chance), "Amber")
+            createBeamToCar(v, Color3.fromRGB(255, 170, 0))
+            notifiedVehicles[v] = true
+        elseif chance == 0 and not notifiedVehicles[v] then
+            screenAlert("GOLD", "Gold")
+            createBeamToCar(v, Color3.fromRGB(255, 215, 0))
+            notifiedVehicles[v] = true
+        end
+
+        local hl = v:FindFirstChild("ESPHighlight") or Instance.new("Highlight", v)
+        hl.Name = "ESPHighlight"
+        hl.OutlineThickness = 1.12
+
+        if chance == 0 then
+            hl.FillColor = Color3.fromRGB(255, 215, 0)
+            hl.FillTransparency = 0.23
+        elseif chance and chance <= ACCEPTEDRATE then
+            hl.FillColor = Color3.fromRGB(255, 0, 0)
+            hl.FillTransparency = 0.25
+        elseif chance and chance <= AmberAlertRate then
+            hl.FillColor = Color3.fromRGB(255, 170, 0)
+            hl.FillTransparency = 0.33
+        else
+            hl.FillColor = Color3.fromRGB(255, 255, 255)
+            hl.FillTransparency = 0.87
+        end
+
+        local bill = v:FindFirstChild("ESPGui") or Instance.new("BillboardGui", v)
+        bill.Name = "ESPGui"
+        bill.Size = UDim2.new(0, 80, 0, 27)
+        bill.StudsOffset = Vector3.new(0, 3.7, 0)
+        bill.AlwaysOnTop = true
+
+        local lab = bill:FindFirstChild("TextLabel") or Instance.new("TextLabel", bill)
+        lab.BackgroundTransparency = 1
+        lab.Size = UDim2.new(1, 0, 1, 0)
+        lab.TextColor3 = Color3.new(1, 1, 1)
+        lab.TextStrokeTransparency = 0.4
+        lab.TextScaled = true
+        lab.Font = Enum.Font.GothamSemibold
+        lab.RichText = true
+
+        if chance == 0 then
+            lab.Text = "💰 GOLD"
+        elseif chance and chance <= ACCEPTEDRATE then
+            lab.Text = "🔴 " .. chance .. "%"
+        elseif chance and chance <= AmberAlertRate then
+            lab.Text = "🟠 " .. chance .. "%"
+        else
+            lab.Text = "🟢 " .. (chance or "?") .. "%"
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(0.23) and running do
+        pcall(applyESP)
+
+        local hud = player.PlayerGui:FindFirstChild("HUD")
+        local moneyLabel = hud and hud:FindFirstChild("Money")
+        if moneyLabel then
+            local val = tonumber(moneyLabel.Text:gsub("[^%d]", "")) or 0
+            goldLabel.Text = "Gold: <font color='rgb(0,255,150)'>" .. math.floor(val / 20000) .. "</font>"
+        end
+
+        local resp = Workspace:FindFirstChild("JunkyardRespawn", true)
+        local txt = resp and resp:FindFirstChildWhichIsA("TextLabel", true)
+        if txt then
+            local s = txt.Text:match("%d+")
+            if s then timerLabel.Text = "Respawn " .. s end
+        end
+    end
+end)
+
+-- Button Functions
+tpBtn.MouseButton1Click:Connect(function()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then hrp.CFrame = CFrame.new(locations[selectedLoc] + Vector3.new(0, 5, 0)) end
+end)
+
+bestCarBtn.MouseButton1Click:Connect(function()
+    local best, minC = nil, ACCEPTEDRATE + 0.0001
+    for _, v in pairs(vehiclesFolder:GetChildren()) do
+        if isRealCar(v) then
+            local c = tonumber(v:GetAttribute("SpawnChance"))
+            if c and c > 0 and c < minC then minC = c best = v end
+        end
+    end
+    if best then
+        local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then hrp.CFrame = best:GetPivot() + Vector3.new(0, 5, 0) end
+    end
+end)
+
+exclusiveBtn.MouseButton1Click:Connect(function()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    for _, v in pairs(vehiclesFolder:GetChildren()) do
+        if isRealCar(v) and tonumber(v:GetAttribute("SpawnChance")) == 0 then
+            hrp.CFrame = v:GetPivot() + Vector3.new(0, 5, 0)
+            break
+        end
+    end
+end)
+
+-- Hotkeys + Dragging
+UserInputService.InputBegan:Connect(function(i, p)
+    if p then return end
+    if i.KeyCode == Enum.KeyCode.Delete then
+        running = false
+        screenGui:Destroy()
+    elseif i.KeyCode == Enum.KeyCode.Insert then
+        menuOpen = not menuOpen
+        main.Visible = menuOpen
+    elseif i.KeyCode == Enum.KeyCode.LeftControl then
+        local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then hrp.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0, 3, 0)) end
+    end
+end)
+
+local dragging, dragStart, startPos
+main.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = main.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+print("✅ Mobile Optimized Script Loaded")
